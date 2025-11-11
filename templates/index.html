@@ -1,159 +1,193 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>API Status Monitor</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-  <script src="https://unpkg.com/vue@3"></script>
-  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
-  <script src="{{ url_for('static', filename='libs/chart.min.js') }}"></script>
-</head>
-<body>
-{% raw %}
-<div id="app" class="container">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>API Status Monitor</title>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}"
+    />
+    <script src="https://unpkg.com/vue@3"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <script src="{{ url_for('static', filename='libs/chart.min.js') }}"></script>
+  </head>
+  <body>
+    {% raw %}
+    <div id="app" class="container">
+      <div :class="['status-banner', overallStatus.class]">
+        <h2>{{ overallStatus.message }}</h2>
+      </div>
 
-  <div :class="['status-banner', overallStatus.class]">
-    <h2>{{ overallStatus.message }}</h2>
-  </div>
+      <h1>API Monitoring Dashboard</h1>
 
-  <h1>API Monitoring Dashboard</h1>
+      <div class="filters">
+        <input type="text" v-model="search" placeholder="Search API..." />
+        <select v-model="statusFilter">
+          <option value="All">All Status</option>
+          <option value="Online">Online</option>
+          <option value="Degraded">Degraded</option>
+          <option value="Offline">Offline</option>
+        </select>
+        <select v-model="categoryFilter">
+          <option value="All">All Categories</option>
+          <option v-for="c in categoryOptions" :key="c" :value="c">
+            {{ c }}
+          </option>
+        </select>
+        <select v-model="timeRange">
+          <option>24h</option>
+          <option>7d</option>
+          <option>30d</option>
+        </select>
+      </div>
 
-  <div class="filters">
-    <input type="text" v-model="search" placeholder="Search API..." />
-    <select v-model="statusFilter">
-      <option value="All">All Status</option>
-      <option value="Online">Online</option>
-      <option value="Degraded">Degraded</option>
-      <option value="Offline">Offline</option>
-    </select>
-    <select v-model="categoryFilter">
-      <option value="All">All Categories</option>
-      <option v-for="c in categoryOptions" :key="c" :value="c">{{ c }}</option>
-    </select>
-    <select v-model="timeRange">
-      <option>24h</option>
-      <option>7d</option>
-      <option>30d</option>
-    </select>
-  </div>
-
-  <!-- Grouped by category -->
-  <div v-for="(items, cat) in groupedApis" :key="cat" class="category-section" v-show="items.length">
-    <div class="category-header">
-      <h2>{{ cat }}</h2>
-      <span class="count">{{ items.length }} APIs</span>
-    </div>
-
-    <div class="card-grid">
-      <div v-for="api in items" :key="api.name"
-           :class="['card', api.status.toLowerCase()]"
-           @click="openModal(api)">
-
-        <div class="card-header">
-          <h4><span class="icon">{{ api.icon }}</span> {{ api.name }}</h4>
-          <span :class="['status-pill', api.status.toLowerCase()]">{{ api.status }}</span>
+      <!-- Grouped by category -->
+      <div
+        v-for="(items, cat) in groupedApis"
+        :key="cat"
+        class="category-section"
+        v-show="items.length"
+      >
+        <div class="category-header">
+          <h2>{{ cat }}</h2>
+          <span class="count">{{ items.length }} APIs</span>
         </div>
 
-        <div class="metrics-container">
-          <div class="metric">
-            <strong>{{ api.response_time }}s</strong>
-            <span>Response</span>
-          </div>
-          <div class="metric">
-            <strong>{{ api.average }}s</strong>
-            <span>Average</span>
-          </div>
-          <div class="metric">
-            <strong>{{ api.uptime }}%</strong>
-            <span>Uptime</span>
+        <div class="card-grid">
+          <div
+            v-for="api in items"
+            :key="api.name"
+            :class="['card', api.status.toLowerCase()]"
+            @click="openModal(api)"
+          >
+            <div class="card-header">
+              <h4>
+                <span class="icon">{{ api.icon }}</span> {{ api.name }}
+                <span class="method-tag">{{ api.last_method }}</span>
+              </h4>
+              <div class="header-right">
+                <span
+                  :class="['activity-pill', (api.activity || 'Idle').toLowerCase()]"
+                  >{{ api.activity || 'Idle' }}</span
+                >
+                <span :class="['status-pill', api.status.toLowerCase()]"
+                  >{{ api.status }}</span
+                >
+              </div>
+            </div>
+
+            <div class="metrics-container">
+              <div class="metric">
+                <strong>{{ api.response_time }}s</strong>
+                <span>Response</span>
+              </div>
+              <div class="metric">
+                <strong>{{ api.average }}s</strong>
+                <span>Average</span>
+              </div>
+              <div class="metric">
+                <strong>{{ api.uptime }}%</strong>
+                <span>Uptime</span>
+              </div>
+            </div>
+
+            <div class="sparkline-container">
+              <canvas :id="'spark-' + api.name.replace(/\s+/g, '-')"></canvas>
+            </div>
+
+            <!-- Last log preview -->
+            <div class="log-preview" v-if="api.logs && api.logs.length">
+              <span
+                :class="['log-badge', 'lvl-' + api.logs[api.logs.length-1].level.toLowerCase()]"
+              >
+                {{ api.logs[api.logs.length-1].level }}
+              </span>
+              <span class="log-text"
+                >{{ api.logs[api.logs.length-1].message }}</span
+              >
+            </div>
           </div>
         </div>
+      </div>
 
-        <div class="sparkline-container">
-          <canvas :id="'spark-' + api.name.replace(/\s+/g, '-')"></canvas>
-        </div>
+      <!-- Modal -->
+      <div
+        class="modal"
+        v-if="showModal"
+        @click.self="closeModal"
+        @keydown.esc.prevent="closeModal"
+        tabindex="0"
+        ref="modalRoot"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="selectedApi && selectedApi.name ? selectedApi.name + ' details' : 'Service details'"
+      >
+        <div class="modal-content" @click.stop>
+          <header class="modal-header">
+            <div class="modal-title">
+              <span class="icon">{{ selectedApi.icon }}</span>
+              <h2>{{ selectedApi.name }}</h2>
+              <span
+                :class="['status-pill', (selectedApi.status ? selectedApi.status.toLowerCase() : '')]"
+              >
+                {{ selectedApi.status }}
+              </span>
+            </div>
+            <button class="close-btn" @click="closeModal" aria-label="Close">
+              ×
+            </button>
+          </header>
 
-        <!-- Last log preview -->
-        <div class="log-preview" v-if="api.logs && api.logs.length">
-          <span :class="['log-badge', 'lvl-' + api.logs[api.logs.length-1].level.toLowerCase()]">
-            {{ api.logs[api.logs.length-1].level }}
-          </span>
-          <span class="log-text">{{ api.logs[api.logs.length-1].message }}</span>
+          <section class="modal-body">
+            <div class="modal-metrics">
+              <div class="metric">
+                <strong>{{ selectedApi.response_time }}s</strong>
+                <span>Response</span>
+              </div>
+              <div class="metric">
+                <strong>{{ selectedApi.average }}s</strong>
+                <span>Average</span>
+              </div>
+              <div class="metric">
+                <strong>{{ selectedApi.uptime }}%</strong>
+                <span>Uptime</span>
+              </div>
+            </div>
+
+            <div class="chart-container">
+              <canvas id="detailChart"></canvas>
+            </div>
+
+            <h3 class="logs-title">Recent logs</h3>
+            <div class="logs-list" ref="logsList">
+              <div
+                class="log-row"
+                v-for="(l, idx) in (selectedApi.logs || []).slice().reverse()"
+                :key="idx"
+              >
+                <span class="log-ts">{{ l.ts }}</span>
+                <span :class="['log-badge', 'lvl-' + l.level.toLowerCase()]"
+                  >{{ l.level }}</span
+                >
+                <span class="log-msg">{{ l.message }}</span>
+              </div>
+              <div
+                class="logs-empty"
+                v-if="!selectedApi.logs || !selectedApi.logs.length"
+              >
+                No logs for this service.
+              </div>
+            </div>
+          </section>
+
+          <footer class="modal-footer">
+            <button class="btn" @click="closeModal">Close</button>
+          </footer>
         </div>
       </div>
     </div>
-  </div>
-
-  <!-- Modal -->
-  <div
-    class="modal"
-    v-if="showModal"
-    @click.self="closeModal"
-    @keydown.esc.prevent="closeModal"
-    tabindex="0"
-    ref="modalRoot"
-    role="dialog"
-    aria-modal="true"
-    :aria-label="selectedApi && selectedApi.name ? selectedApi.name + ' details' : 'Service details'"
-  >
-    <div class="modal-content" @click.stop>
-      <header class="modal-header">
-        <div class="modal-title">
-          <span class="icon">{{ selectedApi.icon }}</span>
-          <h2>{{ selectedApi.name }}</h2>
-          <span :class="['status-pill', (selectedApi.status ? selectedApi.status.toLowerCase() : '')]">
-            {{ selectedApi.status }}
-          </span>
-        </div>
-        <button class="close-btn" @click="closeModal" aria-label="Close">×</button>
-      </header>
-
-      <section class="modal-body">
-        <div class="modal-metrics">
-          <div class="metric">
-            <strong>{{ selectedApi.response_time }}s</strong>
-            <span>Response</span>
-          </div>
-          <div class="metric">
-            <strong>{{ selectedApi.average }}s</strong>
-            <span>Average</span>
-          </div>
-          <div class="metric">
-            <strong>{{ selectedApi.uptime }}%</strong>
-            <span>Uptime</span>
-          </div>
-        </div>
-
-        <div class="chart-container">
-          <canvas id="detailChart"></canvas>
-        </div>
-
-        <h3 class="logs-title">Recent logs</h3>
-        <div class="logs-list" ref="logsList">
-          <div
-            class="log-row"
-            v-for="(l, idx) in (selectedApi.logs || []).slice().reverse()"
-            :key="idx"
-          >
-            <span class="log-ts">{{ l.ts }}</span>
-            <span :class="['log-badge', 'lvl-' + l.level.toLowerCase()]">{{ l.level }}</span>
-            <span class="log-msg">{{ l.message }}</span>
-          </div>
-          <div class="logs-empty" v-if="!selectedApi.logs || !selectedApi.logs.length">
-            No logs for this service.
-          </div>
-        </div>
-      </section>
-
-      <footer class="modal-footer">
-        <button class="btn" @click="closeModal">Close</button>
-      </footer>
-    </div>
-  </div>
-
-</div>
-{% endraw %}
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
-</body>
+    {% endraw %}
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+  </body>
 </html>
