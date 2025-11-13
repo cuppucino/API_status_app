@@ -1,9 +1,9 @@
-// static/js/app.js
 const app = Vue.createApp({
   data() {
     return {
       apis: [],
-      charts: {},          // { [apiName]: Chart instance } for sparklines
+      orderMap: Object.create(null),
+      nextOrder: 0,
       showModal: false,
       selectedApi: {},
       detailChart: null,
@@ -12,141 +12,254 @@ const app = Vue.createApp({
       categoryFilter: "All",
       timeRange: "24h",
       fetchError: null,
+      tooltip: {
+        show: false,
+        x: 0,
+        y: 0,
+        point: null,   // { value, ts, ok, status }
+      },
     };
   },
 
   computed: {
     categoryOptions() {
-      const set = new Set(this.apis.map(a => a.category));
+      const set = new Set(this.apis.map((a) => a.category));
       return Array.from(set).sort();
     },
+
     filteredApis() {
-      return this.apis.filter(a => {
-        const q = this.search.toLowerCase();
+      const q = this.search.toLowerCase();
+      const list = this.apis.filter((a) => {
         const matchesSearch = a.name.toLowerCase().includes(q);
-        const matchesStatus = this.statusFilter === "All" || a.status === this.statusFilter;
-        const matchesCategory = this.categoryFilter === "All" || a.category === this.categoryFilter;
+        const matchesStatus =
+          this.statusFilter === "All" || a.status === this.statusFilter;
+        const matchesCategory =
+          this.categoryFilter === "All" || a.category === this.categoryFilter;
         return matchesSearch && matchesStatus && matchesCategory;
       });
+      list.sort((a, b) => (a.__order ?? 0) - (b.__order ?? 0));
+      return list;
     },
+
     groupedApis() {
       const groups = {};
-      this.filteredApis.forEach(a => {
+      this.filteredApis.forEach((a) => {
         (groups[a.category] = groups[a.category] || []).push(a);
       });
+      for (const cat in groups) {
+        groups[cat].sort((x, y) => (x.__order ?? 0) - (y.__order ?? 0));
+      }
       return groups;
     },
+
     overallStatus() {
-      if (this.apis.some(a => a.status === "Offline")) {
+      if (this.apis.some((a) => a.status === "Offline")) {
         return { message: "Major System Outage", class: "offline" };
       }
-      if (this.apis.some(a => a.status === "Degraded")) {
-        return { message: "Degraded Performance", class: "degraded" };
-      }
       return { message: "All Systems Operational", class: "online" };
+    },
+
+    // --- tooltip display values ---
+    tooltipLatency() {
+      const p = this.tooltip.point;
+      if (!p || typeof p.value !== "number") return "N/A";
+      return p.value.toFixed(3) + "s";
+    },
+    tooltipStatusCode() {
+      const p = this.tooltip.point;
+      if (!p || p.status == null) return "";
+      if (p.status === 0) return "no response";
+      return p.status;
+    },
+    tooltipReason() {
+      const p = this.tooltip.point;
+      if (!p) return "";
+      if (!p.ok)
+        return "Offline — health check did not return a 2xx/3xx status.";
+      if (typeof p.value !== "number")
+        return "No latency data, but health check is Online.";
+      if (p.value > 1.0)
+        return "Very slow (>1s) — likely degraded or under heavy load.";
+      if (p.value > 0.5)
+        return "Slow (0.5–1s) — approaching SLA limit.";
+      return "Healthy (<0.5s) — within target SLA.";
     },
   },
 
   methods: {
-    // Generates a URL-safe, lowercase-and-dashed string from a given name.
-
-    // Cleans up a name like "User Service" to be "user-service" so it's safe for an HTML ID.
-    slug(name) {
-      return String(name).toLowerCase().replace(/[^a-z0-9_-]+/gi, "-");
+    // ----- stable order -----
+    ensureStableOrder(list) {
+      list.forEach((api) => {
+        if (this.orderMap[api.name] == null) {
+          this.orderMap[api.name] = this.nextOrder++;
+        }
+        api.__order = this.orderMap[api.name];
+      });
+      list.sort((a, b) => a.__order - b.__order);
+      return list;
+    },
+    loadSavedOrder() {
+      try {
+        const saved = JSON.parse(localStorage.getItem("apiOrder") || "{}");
+        if (saved && typeof saved === "object") {
+          this.orderMap = saved;
+          const max = Math.max(-1, ...Object.values(saved));
+          this.nextOrder = isFinite(max) ? max + 1 : 0;
+        }
+      } catch {}
+    },
+    saveOrder() {
+      try {
+        localStorage.setItem("apiOrder", JSON.stringify(this.orderMap));
+      } catch {}
     },
 
-    // Asynchronously fetches the latest API status data from the '/api/status' endpoint.
-    // It preserves and updates the historical data for sparklines and then triggers a UI update.
+    slug(name) {
+      return String(name)
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]+/gi, "-");
+    },
 
-    // Every few seconds, this asks the server, "How is everyone doing?"
-    // It remembers the old health scores to draw the tiny graphs and tells the screen to update.
+    // ----- history slice -----
+    historySlice(api) {
+      if (!api) return { values: [], labels: [], ok: [], status: [] };
+
+      const values = Array.isArray(api.history) ? api.history.slice() : [];
+      const labels = Array.isArray(api.history_ts)
+        ? api.history_ts.slice()
+        : [];
+      const okFlags = Array.isArray(api.history_ok)
+        ? api.history_ok.slice()
+        : [];
+      const statusCodes = Array.isArray(api.history_status)
+        ? api.history_status.slice()
+        : [];
+
+      const len = values.length;
+      let n;
+      switch (this.timeRange) {
+        case "24h":
+          n = 20;
+          break;
+        case "7d":
+          n = 40;
+          break;
+        case "30d":
+        default:
+          n = 60;
+          break;
+      }
+      const start = Math.max(0, len - n);
+
+      return {
+        values: values.slice(start),
+        labels: labels.slice(start),
+        ok: okFlags.slice(start),
+        status: statusCodes.slice(start),
+      };
+    },
+
+    historyBars(api) {
+      const slice = this.historySlice(api);
+      const bars = [];
+      const len = slice.values.length;
+      for (let i = 0; i < len; i++) {
+        bars.push({
+          value: slice.values[i],
+          ts: slice.labels[i] || "",
+          ok: slice.ok[i] !== 0,
+          status: slice.status[i] || 0,
+        });
+      }
+      return bars;
+    },
+
+    latencyClass(value, ok) {
+      if (!ok) return "bar-error";
+      if (typeof value !== "number") return "bar-ok";
+      if (value > 1.0) return "bar-error"; // >1s
+      if (value > 0.5) return "bar-slow";  // 0.5–1s
+      return "bar-ok";                     // <0.5s
+    },
+
+    barHeight(value) {
+      if (typeof value !== "number" || value <= 0) return "15%";
+      const maxSecs = 0.6;
+      const normalized = Math.min(value / maxSecs, 1);
+      const pct = 10 + normalized * 90;
+      return pct + "%";
+    },
+
+    // ----- tooltip helpers -----
+    condPass(kind) {
+      const p = this.tooltip.point;
+      if (!p) return false;
+      if (kind === "status") return !!p.ok;
+      if (kind === "fast") return typeof p.value === "number" && p.value <= 0.5;
+      if (kind === "online") return !!p.ok;
+      return false;
+    },
+    condClass(kind) {
+      return this.condPass(kind)
+        ? "tt-cond tt-cond-pass"
+        : "tt-cond tt-cond-fail";
+    },
+
+    showTooltip(evt, point) {
+      if (!evt) return;
+      this.tooltip.show = true;
+      this.tooltip.point = point;
+      this.updateTooltipPos(evt);
+    },
+
+    moveTooltip(evt) {
+      if (!evt || !this.tooltip.show) return;
+      this.updateTooltipPos(evt);
+    },
+
+    hideTooltip() {
+      this.tooltip.show = false;
+      this.tooltip.point = null;
+    },
+
+    updateTooltipPos(evt) {
+      const offset = 16;
+      // pageX/pageY keep it correct even if page is scrolled
+      this.tooltip.x = evt.pageX + offset;
+      this.tooltip.y = evt.pageY + offset;
+    },
+
+    // ----- fetch + modal/chart -----
     async fetchStatus() {
       try {
         const res = await axios.get("/api/status");
         const data = res.data;
 
-        // Preserve and extend sparkline history safely
-        data.forEach(api => {
-          const existing = this.apis.find(a => a.name === api.name);
-          if (existing && Array.isArray(existing.history)) {
-            api.history = existing.history;
-            api.history.push(api.response_time);
-            if (api.history.length > 50) api.history.shift();
-          } else {
-            api.history = [api.response_time];
+        this.ensureStableOrder(data);
+        this.apis = data;
+        this.saveOrder();
+
+        if (this.showModal && this.selectedApi && this.selectedApi.name) {
+          const updated = this.apis.find(
+            (a) => a.name === this.selectedApi.name
+          );
+          if (updated) {
+            this.selectedApi = updated;
+          }
+        }
+
+        this.$nextTick(() => {
+          if (this.showModal) {
+            this.renderDetailChart();
+            this.scrollLogsToEnd();
           }
         });
-
-        this.apis = data;
-
-        // Draw/update charts only after DOM has the canvases
-        this.$nextTick(() => this.updateSparklines());
       } catch (e) {
         console.error(e);
         this.fetchError = "Failed to fetch status.";
       }
     },
 
-    // Manages the lifecycle of all sparkline charts.
-    // It destroys instances for off-screen canvases (due to filtering) and creates or updates charts for all visible canvases.
-
-    // This is the artist for all the little graphs on the cards.
-    // It erases graphs for cards you've filtered out and draws or updates the graphs for all the cards you can see.
-    updateSparklines() {
-      const visibleApiNames = new Set(this.filteredApis.map(a => a.name));
-
-      // 1) Destroy charts whose cards disappeared (filters/search)
-      for (const apiName in this.charts) {
-        if (!visibleApiNames.has(apiName)) {
-          try { this.charts[apiName].destroy(); } catch {}
-          delete this.charts[apiName];
-        }
-      }
-
-      // 2) Create or update charts for the currently visible cards
-      this.filteredApis.forEach(api => {
-        const canvasId = 'spark-' + this.slug(api.name);
-        const el = document.getElementById(canvasId);
-        if (!el) return; // canvas not in DOM yet (rare race) → skip this tick
-
-        const existing = this.charts[api.name];
-
-        if (!existing) {
-          // Create with v4 options; pass CLONED data arrays
-          this.charts[api.name] = new Chart(el, {
-            type: 'line',
-            data: {
-              labels: Array(api.history.length).fill(''),
-              datasets: [{
-                data: [...api.history],      // clone to avoid Vue-Chart mutation loops
-                borderWidth: 2,
-                tension: 0.4,
-                pointRadius: 0,
-                fill: false,
-              }],
-            },
-            options: {
-              responsive: true,
-              maintainAspectRatio: false,
-              scales: { x: { display: false }, y: { display: false } },
-              plugins: { legend: { display: false }, tooltip: { enabled: false } },
-              animation: false,
-            },
-          });
-        } else {
-          // Update existing (again: clone arrays)
-          existing.data.labels = Array(api.history.length).fill('');
-          existing.data.datasets[0].data = [...api.history];
-          existing.update('none'); // no animation
-        }
-      });
-    },
-
-    // Sets the 'selectedApi' data property, makes the modal visible, and locks background scrolling.
-    // It then renders the detailed chart inside the modal.
-
-    // When you click a card, this makes the big pop-up window appear.
-    // It tells the pop-up *which* API you clicked on, freezes the background, and tells the big graph to draw itself.
     openModal(api) {
       this.selectedApi = api;
       this.showModal = true;
@@ -158,89 +271,129 @@ const app = Vue.createApp({
       });
     },
 
-    // Hides the modal, restores background scrolling, and destroys the detail chart instance to prevent memory leaks.
-
-    // This closes the pop-up window, lets you scroll the main page again, and cleans up the big graph.
     closeModal() {
       this.showModal = false;
       document.body.style.overflow = "";
       if (this.detailChart) {
-        try { this.detailChart.destroy(); } catch {}
+        try {
+          this.detailChart.destroy();
+        } catch {}
         this.detailChart = null;
       }
+      this.hideTooltip();
     },
 
-    // Manages the lifecycle of the large modal chart.
-    // It destroys any existing chart instance and creates a new one using the 'selectedApi' data.
-
-    // This is the artist for the *big* graph in the pop-up.
-    // It erases any old graph and draws a new, detailed one for the API you're looking at.
     renderDetailChart() {
       const canvas = document.getElementById("detailChart");
-      if (!canvas) return;
+      if (!canvas || !this.selectedApi) return;
       const ctx = canvas.getContext("2d");
       if (!ctx) return;
 
       if (this.detailChart) {
-        try { this.detailChart.destroy(); } catch {}
+        try {
+          this.detailChart.destroy();
+        } catch {}
         this.detailChart = null;
       }
 
+      const slice = this.historySlice(this.selectedApi);
+      if (!slice.values.length) return;
+
       const colorByStatus = (s) => {
-        const m = { online: '#90ee90', degraded: '#ffe600', offline: '#ff6347' };
-        return m[(s || '').toLowerCase()] || '#66b3ff';
+        const m = { online: "#90ee90", offline: "#ff6347" };
+        return m[(s || "").toLowerCase()] || "#66b3ff";
       };
+
+      const lineColor = colorByStatus(this.selectedApi.status);
+      const labels = slice.labels;
 
       this.detailChart = new Chart(ctx, {
         type: "line",
         data: {
-          labels: Array(this.selectedApi.history.length).fill(""),
-          datasets: [{
-            label: "Response Time (s)",
-            data: [...this.selectedApi.history],   // clone
-            borderColor: colorByStatus(this.selectedApi.status),
-            borderWidth: 2,
-            tension: 0.3,
-            pointRadius: 0,
-            fill: false,
-          }],
+          labels: labels,
+          datasets: [
+            {
+              label: "Response Time (s)",
+              data: slice.values,
+              borderColor: lineColor,
+              borderWidth: 2,
+              tension: 0.3,
+              pointRadius: 0,
+              fill: false,
+            },
+          ],
         },
         options: {
           responsive: true,
           maintainAspectRatio: false,
           scales: {
-            x: { grid: { display: false }, ticks: { display: false } },
-            y: { grid: { color: "rgba(255,255,255,0.08)" }, ticks: { display: false } },
+            x: {
+              grid: { display: false },
+              ticks: {
+                display: true,
+                color: "#888",
+                autoSkip: true,
+                maxTicksLimit: 6,
+                maxRotation: 0,
+                minRotation: 0,
+              },
+            },
+            y: {
+              grid: { color: "rgba(255,255,255,0.08)" },
+              ticks: {
+                display: true,
+                color: "#888",
+              },
+            },
           },
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: {
+              enabled: true,
+              callbacks: {
+                title: (items) => {
+                  const idx = items[0].dataIndex;
+                  return labels[idx] || "";
+                },
+                label: (ctx) => {
+                  const v = ctx.parsed.y;
+                  return `${v.toFixed(3)}s`;
+                },
+              },
+            },
+          },
           animation: false,
         },
       });
     },
 
-    // Utility function to auto-scroll the modal's log list to the bottom, ensuring the latest log is visible.
-    
-    // This makes the log list in the pop-up automatically scroll down to the newest message, just like a chat app.
     scrollLogsToEnd(force = false) {
       const el = this.$refs.logsList;
       if (!el) return;
-      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      const nearBottom =
+        el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       if (force || nearBottom) el.scrollTop = el.scrollHeight;
     },
   },
 
   watch: {
-    search()        { this.$nextTick(() => this.updateSparklines()); },
-    statusFilter()  { this.$nextTick(() => this.updateSparklines()); },
-    categoryFilter(){ this.$nextTick(() => this.updateSparklines()); },
-    selectedApi()   { if (this.showModal) this.$nextTick(() => this.renderDetailChart()); },
+    timeRange() {
+      if (this.showModal) {
+        this.$nextTick(() => this.renderDetailChart());
+      }
+    },
+    selectedApi() {
+      if (this.showModal) {
+        this.$nextTick(() => this.renderDetailChart());
+      }
+    },
   },
 
   mounted() {
+    this.loadSavedOrder();
     this.fetchStatus();
     setInterval(this.fetchStatus, 5000);
 
-    // Esc to close modal
     window.addEventListener("keydown", (e) => {
       if (this.showModal && e.key === "Escape") this.closeModal();
     });

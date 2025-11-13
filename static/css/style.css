@@ -1,3 +1,8 @@
+/* Keep the page width stable even when a vertical scrollbar appears/disappears */
+html {
+  scrollbar-gutter: stable both-edges;
+}
+
 /* Base */
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
@@ -39,11 +44,6 @@ h2 {
   background: rgba(144, 238, 144, 0.2);
   border: 1px solid #90ee90;
   color: #90ee90;
-}
-.status-banner.degraded {
-  background: rgba(255, 230, 0, 0.2);
-  border: 1px solid #ffe600;
-  color: #ffe600;
 }
 .status-banner.offline {
   background: rgba(255, 99, 71, 0.2);
@@ -106,12 +106,18 @@ select:focus {
 .card {
   background: #1a1a1a;
   border-radius: 8px;
-  padding: 18px;
+  padding: 18px 18px 22px; /* extra bottom padding */
   border-left: 5px solid #444;
   cursor: pointer;
   transition: all 0.2s ease;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  display: grid;
+  /* give each row its natural height, and more room for the bars */
+  grid-template-rows: auto auto minmax(64px, auto) auto;
+  row-gap: 10px;
+  min-height: 260px;
 }
+
 .card:hover {
   transform: translateY(-3px);
   background: #282828;
@@ -119,9 +125,7 @@ select:focus {
 .card.online {
   border-left-color: #90ee90;
 }
-.card.degraded {
-  border-left-color: #ffe600;
-}
+
 .card.offline {
   border-left-color: #ff6347;
 }
@@ -156,20 +160,20 @@ select:focus {
   background: #90ee90;
   color: #0a0a0a;
 }
-.status-pill.degraded {
-  background: #ffe600;
-  color: #0a0a0a;
-}
+
 .status-pill.offline {
   background: #ff6347;
   color: #0a0a0a;
 }
 
 .metrics-container {
-  display: flex;
-  justify-content: space-between;
-  margin-bottom: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: end;
+  column-gap: 12px;
+  margin-bottom: 16px; /* a bit more space above bars */
 }
+
 .metric {
   display: flex;
   flex-direction: column;
@@ -179,6 +183,9 @@ select:focus {
   font-size: 22px;
   font-weight: 700;
   color: #f0f0f0;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  min-height: 28px;
 }
 .metric span {
   font-size: 12px;
@@ -187,19 +194,24 @@ select:focus {
 }
 
 .sparkline-container {
-  width: 100%;
   height: 40px;
+}
+.sparkline-container canvas {
+  width: 100% !important;
+  height: 40px !important;
+  display: block;
 }
 
 /* Log preview inside card */
 .log-preview {
-  margin-top: 10px;
+  margin-top: 4px; /* smaller so it sits nicely under bars */
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 13px;
   color: #cfcfcf;
 }
+
 .log-badge {
   display: inline-block;
   padding: 2px 8px;
@@ -231,7 +243,7 @@ select:focus {
 .modal {
   position: fixed;
   inset: 0;
-  padding: 24px; /* prevents close button from going off-screen */
+  padding: 24px;
   background: rgba(0, 0, 0, 0.7);
   display: flex;
   align-items: center;
@@ -239,34 +251,39 @@ select:focus {
   backdrop-filter: blur(8px);
   z-index: 9999;
 }
+
 .modal-content {
   background: #1a1a1a;
-  border-radius: 10px;
-  width: 640px;
-  max-width: calc(100% - 32px);
-  max-height: 85vh; /* body scrolls within */
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.6);
+  border-radius: 12px;
+  /* wider + taller */
+  width: min(1040px, calc(100% - 40px));
+  max-height: 92vh;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.7);
   border: 1px solid #2a2a2a;
   display: grid;
-  grid-template-rows: auto 1fr auto; /* header | body | footer */
+  grid-template-rows: auto 1fr auto;
 }
+
 .modal-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 16px 18px;
+  padding: 18px 22px;
   border-bottom: 1px solid #2a2a2a;
 }
+
 .modal-title {
   display: flex;
   align-items: center;
   gap: 10px;
 }
+
 .modal-header .icon {
   font-size: 20px;
   color: #ffe600;
 }
+
 .modal-header h2 {
   margin: 0;
   border: none;
@@ -274,11 +291,12 @@ select:focus {
   color: #ffe600;
   font-size: 18px;
 }
+
 .close-btn {
   background: transparent;
   border: none;
   color: #ffe600;
-  font-size: 26px;
+  font-size: 28px;
   line-height: 1;
   cursor: pointer;
 }
@@ -288,36 +306,40 @@ select:focus {
 }
 
 .modal-body {
-  padding: 16px 18px;
-  overflow: auto; /* only body scrolls */
+  padding: 22px 24px 20px;   /* more breathing room */
+  overflow: auto;
 }
+
 .modal-footer {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 12px 18px;
+  padding: 14px 22px;
   border-top: 1px solid #2a2a2a;
 }
+
 .btn {
   background: #2a2a2a;
   color: #f0f0f0;
   border: 1px solid #3a3a3a;
   border-radius: 8px;
-  padding: 8px 14px;
+  padding: 8px 16px;
   cursor: pointer;
 }
 .btn:hover {
   background: #333;
 }
 
+/* metrics at top of modal */
 .modal-metrics {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 18px;
+  margin-bottom: 14px;
 }
+
 .modal-metrics .metric strong {
-  font-size: 22px;
+  font-size: 24px;
 }
 .modal-metrics .metric span {
   font-size: 12px;
@@ -325,28 +347,60 @@ select:focus {
   text-transform: uppercase;
 }
 
-.chart-container {
-  height: 260px;
-  margin-top: 12px;
+/* extra meta rows (category / method / last checked) */
+.modal-meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  margin-top: 4px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #ccc;
+}
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.meta-label {
+  color: #888;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+.meta-value {
+  font-family: Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  color: #f0f0f0;
 }
 
+/* bigger chart area */
+.chart-container {
+  height: 340px;
+  margin-top: 18px;
+  margin-bottom: 18px;
+}
+
+/* taller logs box so it feels less cramped */
 .logs-title {
-  margin-top: 16px;
+  margin-top: 24px;
   color: #ffe600;
 }
+
 .logs-list {
   margin-top: 10px;
   border: 1px solid #2a2a2a;
   border-radius: 6px;
-  max-height: 240px; /* scroll within logs list */
+  max-height: 320px;
   overflow: auto;
   background: #141414;
 }
+
 .log-row {
   display: grid;
-  grid-template-columns: 150px 80px 1fr;
+  grid-template-columns: 180px 80px 1fr;
   gap: 10px;
-  padding: 8px 10px;
+  padding: 8px 12px;
   border-bottom: 1px solid #222;
   align-items: center;
   font-size: 13px;
@@ -396,3 +450,152 @@ select:focus {
   background: #7a1f1f;
   color: #ffeaea;
 }
+
+/* NEW: meta rows in modal */
+.modal-meta {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 4px;
+  margin-top: 8px;
+  margin-bottom: 8px;
+  font-size: 13px;
+  color: #ccc;
+}
+.meta-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.meta-label {
+  color: #888;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+.meta-value {
+  font-family: Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  color: #f0f0f0;
+}
+
+/* mini bar strip like second screenshot */
+.bar-strip {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 64px; /* taller graph area */
+  margin-top: 8px;
+  margin-bottom: 8px; /* space above log row */
+}
+
+.bar-strip .bar {
+  flex: 1 0 auto;
+  min-width: 2px;
+  border-radius: 4px;
+  background: #333;
+  opacity: 0.85;
+  transition: height 0.15s ease, background-color 0.15s ease, opacity 0.15s ease,
+    transform 0.1s ease;
+}
+
+.bar-strip .bar-ok {
+  background: #32cd32;
+}
+
+.bar-strip .bar-slow {
+  background: #ffd966;
+}
+
+.bar-strip .bar-error {
+  background: #ff6347;
+}
+
+.card:hover .bar-strip .bar {
+  opacity: 1;
+  transform: translateY(-1px);
+}
+
+/* bigger bars in modal */
+.modal-bar-strip {
+  margin-top: 12px;
+  margin-bottom: 14px;
+  height: 80px;
+}
+.modal-bar-strip .bar {
+  min-width: 3px;
+}
+
+/* custom tooltip for bar hover */
+.bar-tooltip {
+  position: fixed;
+  z-index: 10000;
+  background: #10141f;
+  color: #f0f0f0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 11px;
+  pointer-events: none;
+  border: 1px solid #263147;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.7);
+  min-width: 260px;
+  max-width: 320px;
+}
+
+.tt-section + .tt-section {
+  margin-top: 8px;
+}
+
+.tt-label {
+  font-size: 10px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: #9fa6c3;
+  margin-bottom: 2px;
+}
+
+.tt-value {
+  font-family: Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  font-size: 11px;
+  color: #f5f5f5;
+}
+
+.tt-conditions {
+  list-style: none;
+  margin: 2px 0 0;
+  padding: 0;
+}
+
+.tt-cond {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  font-size: 11px;
+  padding: 1px 0;
+}
+
+.tt-cond-pass {
+  color: #c9f7c9;
+}
+
+.tt-cond-fail {
+  color: #ffc9c9;
+}
+
+.tt-bullet {
+  font-size: 11px;
+}
+
+.tt-detail {
+  margin-left: 4px;
+  color: #9fa6c3;
+}
+
+.tt-reason {
+  margin-top: 6px;
+  font-size: 11px;
+  color: #cbd5f5;
+}
+
