@@ -8,19 +8,119 @@ app = Flask(__name__)
 
 # -------- Config --------
 BASE_URL = os.environ.get("TARGET_BASE_URL", "http://127.0.0.1:8001").rstrip("/")
-TIMEOUT_S = float(os.environ.get("HTTP_TIMEOUT_S", "5"))
+TIMEOUT_S = float(os.environ.get("HTTP_TIMEOUT_S", "2.5"))
 LATENCY_SLA_S = float(os.environ.get("LATENCY_DEGRADED_S", "1.0"))
 
 # -------- Endpoints --------
 ENDPOINTS = [
-    {"label": "DB-Connection", "path": "/test-db", "category": "HR Management System", "method": "GET"},
+    # ========================= HR MANAGEMENT SYSTEM ==========================
+    {
+        "label": "DB-Connection",
+        "path": "/test-db",
+        "category": "HR Management System",
+        "method": "GET",
+        "base_url": "https://1zvrmvz1-5000.asse.devtunnels.ms",
+    },
+    {
+        "label": "health",
+        "path": "/healthz",
+        "category": "HR Management System",
+        "method": "GET",
+        "base_url": "https://1zvrmvz1-5000.asse.devtunnels.ms",
+    },
+    # ========================= REX ==========================
+    {
+        "label": "Request Status",
+        "path": "/request/status",
+        "category": "REX",
+        "method": "GET",
+        "base_url": "https://rex.secondlifeasiaexpress.com",
+    },
+    {
+        "label": "Xero Status",
+        "path": "/xero/status",
+        "category": "REX",
+        "method": "GET",
+        "base_url": "https://rex.secondlifeasiaexpress.com",
+    },
+    {
+        "label": "Diagnostics",
+        "path": "/diagnostics/status",
+        "category": "REX",
+        "method": "GET",
+        "base_url": "https://rex.secondlifeasiaexpress.com",
+    },
+    {
+        "label": "Live System - Homepage",
+        "path": "/",
+        "category": "REX",
+        "method": "GET",
+        "base_url": "https://rex.secondlifeasiaexpress.com",
+    },
+    {
+        "label": "Logger - Liveness",
+        "path": "/healthz",
+        "category": "REX",
+        "method": "GET",
+        "base_url": "https://5pq1w7t1-5000.asse.devtunnels.ms",
+    },
+    {
+        "label": "Logger - Readiness",
+        "path": "/readyz",
+        "category": "REX",
+        "method": "GET",
+        "base_url": "https://5pq1w7t1-5000.asse.devtunnels.ms",
+    },
+    # ========================= CTRLYTICS ==========================
+    {
+        "label": "Ctrlytics - Server Status",
+        "path": "/",
+        "category": "Ctrlytics API",
+        "method": "GET",
+        "base_url": "http://192.168.1.163:6565/",
+    },
+    {
+        "label": "Ctrlytics - Xero OAuth",
+        "path": "/credit/xero/trigger-oauth",
+        "category": "Ctrlytics API",
+        "method": "GET",
+        "base_url": "http://192.168.1.163:6565/",
+    },
+    {
+        "label": "Ctrlytics - Get Client",
+        "path": "/v1/client/get",
+        "category": "Ctrlytics API",
+        "method": "GET",
+        "base_url": "http://192.168.1.163:6565/",
+    },
+    {
+        "label": "Ctrlytics - Get Content",
+        "path": "/v1/cms-content/content",
+        "category": "Ctrlytics API",
+        "method": "GET",
+        "base_url": "http://192.168.1.163:6565/",
+    },
+    {
+        "label": "Ctrlytics - Get PDF",
+        "path": "/v1/billing/get-pdf",
+        "category": "Ctrlytics API",
+        "method": "GET",
+        "base_url": "http://192.168.1.163:6565/",
+    },
+    {
+        "label": "Ctrlytics - healthz",
+        "path": "/v1/healthz",
+        "category": "Ctrlytics API",
+        "method": "GET",
+        "base_url": "http://192.168.1.163:6565/",
+    },
 ]
 
 # -------- Rolling stores --------
-history_rtt = defaultdict(lambda: deque(maxlen=60))    # response times
-history_ts = defaultdict(lambda: deque(maxlen=60))     # timestamps
+history_rtt = defaultdict(lambda: deque(maxlen=60))  # response times
+history_ts = defaultdict(lambda: deque(maxlen=60))  # timestamps
 history_ok_flags = defaultdict(lambda: deque(maxlen=60))  # 1=ok,0=fail
-history_ok = defaultdict(lambda: deque(maxlen=200))    # uptime window
+history_ok = defaultdict(lambda: deque(maxlen=200))  # uptime window
 history_status = defaultdict(lambda: deque(maxlen=60))
 logs_store = defaultdict(list)
 
@@ -47,14 +147,17 @@ def compute_uptime(name: str) -> float:
 
 
 def classify_health(sc: int):
-    if 200 <= sc < 400:
+    if 200 <= sc < 300:  # Only 2xx is Online
         return "Online", "INFO"
-    return "Offline", "ERROR"
+    if 300 <= sc < 400:  # 3xx is a Redirect
+        return "Redirect", "WARN"
+    return "Offline", "ERROR"  # 4xx, 5xx, etc.
 
 
 def check_one(item: dict) -> dict:
     name = item["label"]
-    url = BASE_URL + item["path"]
+    item_base_url = item.get("base_url", BASE_URL)
+    url = item_base_url.rstrip("/") + item["path"]
     method = item.get("method", "GET").upper()
 
     t0 = time.perf_counter()
@@ -98,6 +201,7 @@ def check_one(item: dict) -> dict:
 
     return {
         "name": name,
+        "path": item["path"],
         "icon": "📝",
         "category": item["category"],
         "status": health_status,
@@ -114,10 +218,9 @@ def check_one(item: dict) -> dict:
     }
 
 
-
 @app.route("/")
 def home():
-    print(f"[Monitor] Target base = {BASE_URL}", flush=True)
+    print(f"[Monitor] Default base = {BASE_URL}", flush=True)
     return render_template("index.html")
 
 
@@ -139,5 +242,6 @@ def api_status():
 
 
 if __name__ == "__main__":
-    print(f"[Monitor] Target base = {BASE_URL}", flush=True)
+    print(f"[Monitor] Default base = {BASE_URL}", flush=True)
     app.run(debug=True)
+

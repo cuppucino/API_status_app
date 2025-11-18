@@ -16,8 +16,13 @@ const app = Vue.createApp({
         show: false,
         x: 0,
         y: 0,
-        point: null,   // { value, ts, ok, status }
+        point: null, // { value, ts, ok, status }
       },
+
+      isLoading: false,
+
+      refreshInterval: 30000, // Default to 5 seconds
+      fetchIntervalId: null, // To store the timer ID
     };
   },
 
@@ -52,13 +57,6 @@ const app = Vue.createApp({
       return groups;
     },
 
-    overallStatus() {
-      if (this.apis.some((a) => a.status === "Offline")) {
-        return { message: "Major System Outage", class: "offline" };
-      }
-      return { message: "All Systems Operational", class: "online" };
-    },
-
     // --- tooltip display values ---
     tooltipLatency() {
       const p = this.tooltip.point;
@@ -69,20 +67,19 @@ const app = Vue.createApp({
       const p = this.tooltip.point;
       if (!p || p.status == null) return "";
       if (p.status === 0) return "no response";
+      if (p.status >= 300 && p.status < 400) return `${p.status} (Redirect)`;
       return p.status;
     },
     tooltipReason() {
       const p = this.tooltip.point;
       if (!p) return "";
-      if (!p.ok)
-        return "Offline — health check did not return a 2xx/3xx status.";
+      if (!p.ok) return "Offline — health check did not return a 2xx status.";
       if (typeof p.value !== "number")
         return "No latency data, but health check is Online.";
       if (p.value > 1.0)
         return "Very slow (>1s) — likely degraded or under heavy load.";
-      if (p.value > 0.5)
-        return "Slow (0.5–1s) — approaching SLA limit.";
-      return "Healthy (<0.5s) — within target SLA.";
+      if (p.value > 0.5) return "Slow (0.5–1s) — approaching SLA limit.";
+      return "Healthy (<0.5s) — within normal parameters.";
     },
   },
 
@@ -178,8 +175,8 @@ const app = Vue.createApp({
       if (!ok) return "bar-error";
       if (typeof value !== "number") return "bar-ok";
       if (value > 1.0) return "bar-error"; // >1s
-      if (value > 0.5) return "bar-slow";  // 0.5–1s
-      return "bar-ok";                     // <0.5s
+      if (value > 0.5) return "bar-slow"; // 0.5–1s
+      return "bar-ok"; // <0.5s
     },
 
     barHeight(value) {
@@ -209,11 +206,13 @@ const app = Vue.createApp({
       if (!evt) return;
       this.tooltip.show = true;
       this.tooltip.point = point;
-      this.updateTooltipPos(evt);
+      this.$nextTick(() => {
+        this.updateTooltipPos(evt);
+      });
     },
 
     moveTooltip(evt) {
-      if (!evt || !this.tooltip.show) return;
+      if (!evt || !this.tooltip.show || !this.$refs.tooltipElement) return;
       this.updateTooltipPos(evt);
     },
 
@@ -224,13 +223,73 @@ const app = Vue.createApp({
 
     updateTooltipPos(evt) {
       const offset = 16;
-      // pageX/pageY keep it correct even if page is scrolled
-      this.tooltip.x = evt.pageX + offset;
-      this.tooltip.y = evt.pageY + offset;
+      const tooltipEl = this.$refs.tooltipElement;
+      const windowWidth = window.innerWidth;
+      const windowHeight = window.innerHeight; // Add window height
+
+      // Default position: bottom-right of pointer
+      let newX = evt.clientX + offset;
+      let newY = evt.clientY + offset;
+
+      if (tooltipEl) {
+        const tooltipWidth = tooltipEl.offsetWidth;
+        const tooltipHeight = tooltipEl.offsetHeight; // Add tooltip height
+
+        // --- Check X-axis (right edge) ---
+        if (evt.clientX + offset + tooltipWidth > windowWidth) {
+          newX = evt.clientX - tooltipWidth - offset; // Flip to the left
+        }
+
+        // --- Check Y-axis (bottom edge) ---
+        if (evt.clientY + offset + tooltipHeight > windowHeight) {
+          newY = evt.clientY - tooltipHeight - offset; // Flip to the top
+        }
+      }
+
+      this.tooltip.x = newX;
+      this.tooltip.y = newY;
+    },
+
+    timeAgo(isoString) {
+      if (!isoString) return "N/A";
+      const date = new Date(isoString.replace(" ", "T"));
+      const seconds = Math.floor((new Date() - date) / 1000);
+
+      if (isNaN(seconds)) return isoString; // Fallback for invalid dates
+
+      if (seconds < 5) return "just now";
+      if (seconds < 60) return `${seconds} seconds ago`;
+      if (seconds < 3600) return `${Math.floor(seconds / 60)} minutes ago`;
+      if (seconds < 86400) return `${Math.floor(seconds / 3600)} hours ago`;
+      return `${Math.floor(seconds / 86400)} days ago`;
+    },
+
+    startPolling() {
+      // Clear any old timer
+      if (this.fetchIntervalId) {
+        clearInterval(this.fetchIntervalId);
+      }
+
+      // If interval is 0 (Paused), don't start a new timer
+      const interval = parseInt(this.refreshInterval, 10);
+      if (interval > 0) {
+        // Set the new timer
+        this.fetchIntervalId = setInterval(this.fetchStatus, interval);
+      }
     },
 
     // ----- fetch + modal/chart -----
     async fetchStatus() {
+      // --- NEW: Clear the automatic timer ---
+      if (this.fetchIntervalId) {
+        clearInterval(this.fetchIntervalId);
+      }
+      // Prevent multiple fetches at the same time
+      if (this.isLoading) return;
+
+      this.isLoading = true; // Set loading state
+      this.fetchError = null; // Clear old errors
+
       try {
         const res = await axios.get("/api/status");
         const data = res.data;
@@ -257,6 +316,11 @@ const app = Vue.createApp({
       } catch (e) {
         console.error(e);
         this.fetchError = "Failed to fetch status.";
+      } finally {
+        this.isLoading = false; // Clear loading state
+
+        // --- Restart the automatic timer ---
+        this.startPolling();
       }
     },
 
@@ -370,13 +434,15 @@ const app = Vue.createApp({
     scrollLogsToEnd(force = false) {
       const el = this.$refs.logsList;
       if (!el) return;
-      const nearBottom =
-        el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
       if (force || nearBottom) el.scrollTop = el.scrollHeight;
     },
   },
 
   watch: {
+    refreshInterval() {
+      this.startPolling();
+    },
     timeRange() {
       if (this.showModal) {
         this.$nextTick(() => this.renderDetailChart());
@@ -392,7 +458,7 @@ const app = Vue.createApp({
   mounted() {
     this.loadSavedOrder();
     this.fetchStatus();
-    setInterval(this.fetchStatus, 5000);
+    this.startPolling();
 
     window.addEventListener("keydown", (e) => {
       if (this.showModal && e.key === "Escape") this.closeModal();

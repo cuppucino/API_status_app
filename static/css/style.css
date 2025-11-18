@@ -1,6 +1,11 @@
-/* Keep the page width stable even when a vertical scrollbar appears/disappears */
 html {
+  box-sizing: border-box;
   scrollbar-gutter: stable both-edges;
+}
+*,
+*:before,
+*:after {
+  box-sizing: inherit;
 }
 
 /* Base */
@@ -33,29 +38,6 @@ h2 {
   font-weight: 600;
 }
 
-/* Status Banner */
-.status-banner {
-  padding: 15px 20px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  text-align: center;
-}
-.status-banner.online {
-  background: rgba(144, 238, 144, 0.2);
-  border: 1px solid #90ee90;
-  color: #90ee90;
-}
-.status-banner.offline {
-  background: rgba(255, 99, 71, 0.2);
-  border: 1px solid #ff6347;
-  color: #ff6347;
-}
-.status-banner h2 {
-  margin: 0;
-  border: none;
-  color: inherit;
-}
-
 /* Filters */
 .filters {
   display: flex;
@@ -65,7 +47,8 @@ h2 {
   margin-bottom: 25px;
 }
 input,
-select {
+select,
+.btn-refresh {
   padding: 10px 14px;
   border: 1px solid #333;
   border-radius: 6px;
@@ -77,6 +60,22 @@ select {
 input:focus,
 select:focus {
   border-color: #ffe600;
+}
+
+.btn-refresh {
+  cursor: pointer;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+.btn-refresh:hover:not(:disabled) {
+  border-color: #ffe600;
+  background: #222;
+}
+
+.btn-refresh:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
 }
 
 /* Category Section */
@@ -100,7 +99,7 @@ select:focus {
 /* Card Grid */
 .card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 20px;
 }
 .card {
@@ -306,7 +305,7 @@ select:focus {
 }
 
 .modal-body {
-  padding: 22px 24px 20px;   /* more breathing room */
+  padding: 22px 24px 20px; /* more breathing room */
   overflow: auto;
 }
 
@@ -599,3 +598,127 @@ select:focus {
   color: #cbd5f5;
 }
 
+.loading-fade {
+  opacity: 0.5;
+  pointer-events: none; /* Prevents clicking cards while loading */
+  transition: opacity 0.2s linear;
+}
+
+.loading-fade[class="loading-fade"] {
+  opacity: 1;
+}
+
+/* ========================================= */
+/* == MOBILE & TABLET RESPONSIVE STYLES == */
+/* ========================================= */
+@media (max-width: 768px) {
+  /* --- Base Layout --- */
+  body {
+    padding: 10px; /* Less padding on small screens */
+  }
+
+  h1 {
+    font-size: 24px; /* Smaller main title */
+    letter-spacing: 0.5px;
+    margin-bottom: 15px;
+  }
+
+  h2 {
+    margin-top: 30px;
+  }
+
+  /* --- Filters --- */
+  .filters {
+    flex-direction: column; /* Stack filters vertically */
+    align-items: stretch; /* Make them full-width */
+    gap: 12px;
+  }
+
+  .filters input,
+  .filters select {
+    width: 100%; /* Ensure they fill the space */
+  }
+
+  /* --- Category Headers --- */
+  .category-header {
+    flex-direction: column; /* Stack title and count */
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 12px; /* Add space below stacked header */
+  }
+
+  /* --- Cards --- */
+  .card {
+    padding: 16px;
+    min-height: 0; /* Let content define height, not a fixed value */
+  }
+
+  .metric strong {
+    font-size: 20px; /* Slightly smaller metric text */
+  }
+
+  /* --- Modal --- */
+  .modal {
+    padding: 8px; /* Tighter padding on screen edges */
+  }
+
+  .modal-content {
+    /* Use 100% width/height minus a small margin */
+    width: calc(100% - 16px);
+    max-height: 95vh;
+  }
+
+  .modal-header {
+    padding: 14px 16px;
+  }
+
+  .modal-title {
+    flex-wrap: wrap; /* Allow title and status pill to wrap */
+    gap: 8px;
+  }
+
+  .modal-header h2 {
+    font-size: 17px; /* Smaller modal title */
+  }
+
+  .modal-body {
+    padding: 16px; /* Tighter modal padding */
+  }
+
+  /* --- Modal Metrics --- */
+  .modal-metrics {
+    grid-template-columns: 1fr; /* Stack metrics vertically */
+    gap: 16px;
+    text-align: center; /* Center them */
+  }
+
+  .modal-metrics .metric {
+    align-items: center; /* Center label + value */
+  }
+
+  /* --- Modal Chart & Logs --- */
+  .chart-container {
+    height: 240px; /* Shorter chart on mobile */
+  }
+
+  .logs-title {
+    margin-top: 16px;
+  }
+
+  .logs-list {
+    max-height: 250px; /* Shorter log list */
+  }
+
+  /* --- CRITICAL: Log Row Fix --- */
+  .log-row {
+    grid-template-columns: 1fr; /* Stack log info vertically */
+    gap: 4px; /* Tighter spacing */
+    padding: 10px 12px;
+  }
+
+  .log-ts {
+    font-size: 11px;
+    color: #888; /* Make timestamp less prominent */
+  }
+  /* The badge and message will flow naturally below */
+}

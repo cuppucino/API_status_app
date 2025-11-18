@@ -15,10 +15,6 @@
   <body>
     {% raw %}
     <div id="app" class="container">
-      <div :class="['status-banner', overallStatus.class]">
-        <h2>{{ overallStatus.message }}</h2>
-      </div>
-
       <h1>API Monitoring Dashboard</h1>
 
       <div class="filters">
@@ -27,6 +23,7 @@
           <option value="All">All Status</option>
           <option value="Online">Online</option>
           <option value="Offline">Offline</option>
+          <option value="Redirect">Redirect</option>
         </select>
         <select v-model="categoryFilter">
           <option value="All">All Categories</option>
@@ -34,83 +31,99 @@
             {{ c }}
           </option>
         </select>
-        <select v-model="timeRange">
-          <option>24h</option>
-          <option>7d</option>
-          <option>30d</option>
+        <select v-model="timeRange" title="History Range">
+          <option value="24h">History (24h)</option>
+          <option value="7d">History (7d)</option>
+          <option value="30d">History (30d)</option>
         </select>
+
+        <select v-model="refreshInterval" title="Refresh Interval">
+          <option value="5000">Refresh (5s)</option>
+          <option value="30000">Refresh (30s)</option>
+          <option value="60000">Refresh (1m)</option>
+          <option value="3600000">Refresh (1h)</option>
+          <option value="0">Refresh (Paused)</option>
+        </select>
+
+        <button class="btn-refresh" @click="fetchStatus" :disabled="isLoading">
+          {{ isLoading ? 'Refreshing...' : 'Refresh Now' }}
+        </button>
       </div>
 
-      <div
-        v-for="(items, cat) in groupedApis"
-        :key="cat"
-        class="category-section"
-        v-show="items.length"
-      >
-        <div class="category-header">
-          <h2>{{ cat }}</h2>
-          <span class="count">{{ items.length }} APIs</span>
-        </div>
+      <div :class="{ 'loading-fade': isLoading }">
+        <div
+          v-for="(items, cat) in groupedApis"
+          :key="cat"
+          class="category-section"
+          v-show="items.length"
+        >
+          <div class="category-header">
+            <h2>{{ cat }}</h2>
+            <span class="count">{{ items.length }} APIs</span>
+          </div>
 
-        <div class="card-grid">
-          <div
-            v-for="api in items"
-            :key="api.name"
-            :class="['card', api.status.toLowerCase()]"
-            @click="openModal(api)"
-          >
-            <div class="card-header">
-              <h4>
-                <span class="icon">{{ api.icon }}</span>
-                {{ api.name }}
-              </h4>
-              <div class="header-right">
-                <span :class="['status-pill', api.status.toLowerCase()]">
-                  {{ api.status }}
+          <div class="card-grid">
+            <div
+              v-for="api in items"
+              :key="api.name"
+              :class="['card', api.status.toLowerCase()]"
+              @click="openModal(api)"
+            >
+              <div class="card-header">
+                <div class="card-title-block">
+                  <h4>
+                    <span class="icon">{{ api.icon }}</span>
+                    {{ api.name }}
+                  </h4>
+                  <span class="card-path">{{ api.path }}</span>
+                </div>
+                <div class="header-right">
+                  <span :class="['status-pill', api.status.toLowerCase()]">
+                    {{ api.status }}
+                  </span>
+                </div>
+              </div>
+
+              <div class="metrics-container">
+                <div class="metric">
+                  <strong>{{ api.response_time }}s</strong>
+                  <span>Response</span>
+                </div>
+                <div class="metric">
+                  <strong>{{ api.average }}s</strong>
+                  <span>Average</span>
+                </div>
+                <div class="metric">
+                  <strong>{{ api.uptime }}%</strong>
+                  <span>Uptime</span>
+                </div>
+              </div>
+
+              <div class="bar-strip" @mouseleave="hideTooltip">
+                <div
+                  v-for="(p, idx) in historyBars(api)"
+                  :key="idx"
+                  class="bar"
+                  :class="latencyClass(p.value, p.ok)"
+                  :style="{ height: barHeight(p.value) }"
+                  @mouseenter="showTooltip($event, p)"
+                  @mousemove="moveTooltip($event)"
+                ></div>
+              </div>
+
+              <div class="log-preview" v-if="api.logs && api.logs.length">
+                <span
+                  :class="[
+                    'log-badge',
+                    'lvl-' + api.logs[api.logs.length - 1].level.toLowerCase(),
+                  ]"
+                >
+                  {{ api.logs[api.logs.length - 1].level }}
+                </span>
+                <span class="log-text">
+                  {{ api.logs[api.logs.length - 1].message }}
                 </span>
               </div>
-            </div>
-
-            <div class="metrics-container">
-              <div class="metric">
-                <strong>{{ api.response_time }}s</strong>
-                <span>Response</span>
-              </div>
-              <div class="metric">
-                <strong>{{ api.average }}s</strong>
-                <span>Average</span>
-              </div>
-              <div class="metric">
-                <strong>{{ api.uptime }}%</strong>
-                <span>Uptime</span>
-              </div>
-            </div>
-
-            <!-- mini uptime / latency bars -->
-            <div class="bar-strip" @mouseleave="hideTooltip">
-              <div
-                v-for="(p, idx) in historyBars(api)"
-                :key="idx"
-                class="bar"
-                :class="latencyClass(p.value, p.ok)"
-                :style="{ height: barHeight(p.value) }"
-                @mouseenter="showTooltip($event, p)"
-                @mousemove="moveTooltip($event)"
-              ></div>
-            </div>
-
-            <div class="log-preview" v-if="api.logs && api.logs.length">
-              <span
-                :class="[
-                  'log-badge',
-                  'lvl-' + api.logs[api.logs.length - 1].level.toLowerCase(),
-                ]"
-              >
-                {{ api.logs[api.logs.length - 1].level }}
-              </span>
-              <span class="log-text">
-                {{ api.logs[api.logs.length - 1].message }}
-              </span>
             </div>
           </div>
         </div>
@@ -177,9 +190,13 @@
                 <span class="meta-value">{{ selectedApi.last_method }}</span>
               </div>
               <div class="meta-row">
+                <span class="meta-label">Path</span>
+                <span class="meta-value">{{ selectedApi.path }}</span>
+              </div>
+              <div class="meta-row">
                 <span class="meta-label">Last checked</span>
                 <span class="meta-value">
-                  {{ selectedApi.last_checked || 'N/A' }}
+                  {{ timeAgo(selectedApi.last_checked) }}
                 </span>
               </div>
             </div>
@@ -229,10 +246,11 @@
         </div>
       </div>
 
-      <!-- GLOBAL hover card (inside #app so Vue can control it) -->
+      <!-- GLOBAL hover card -->
       <div
         v-if="tooltip.show && tooltip.point"
         class="bar-tooltip"
+        ref="tooltipElement"
         :style="{ left: tooltip.x + 'px', top: tooltip.y + 'px' }"
       >
         <div class="tt-section">
@@ -250,7 +268,7 @@
           <ul class="tt-conditions">
             <li :class="condClass('status')">
               <span class="tt-bullet">✔</span>
-              [STATUS] is 2xx/3xx
+              [STATUS] is 2xx
               <span class="tt-detail" v-if="tooltipStatusCode">
                 ({{ tooltipStatusCode }})
               </span>
